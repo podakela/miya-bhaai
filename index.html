@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#09090f">
+<title>Miya Bhai — The Righteous Fighter</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden; background: #09090f; color: #f8fafc;
+    font-family: Consolas, 'Courier New', monospace;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  #game { width: 100vw; height: 100vh; display: grid; place-items: center; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+
+  .touch { position: fixed; inset: 0; pointer-events: none; z-index: 100; display: none; }
+  .touch.on { display: block; }
+  .pad {
+    position: absolute; bottom: 16px; left: 16px;
+    display: grid; grid-template-columns: repeat(3, 60px); grid-template-rows: repeat(3, 60px);
+    gap: 6px; pointer-events: auto; opacity: 0.85;
+  }
+  .btn {
+    display: grid; place-items: center;
+    background: rgba(12,8,22,0.72); color: #fff3c4;
+    border: 2px solid rgba(255,255,255,0.45); border-radius: 12px;
+    font: 700 12px/1 Consolas, monospace;
+    -webkit-user-select: none;
+    transition: transform 60ms, background 60ms;
+  }
+  .btn.pressed { transform: scale(0.9); background: rgba(250,159,50,0.85); color: #2b1206; }
+  .pad .up { grid-area: 1/2; }
+  .pad .left { grid-area: 2/1; }
+  .pad .down { grid-area: 3/2; }
+  .pad .right { grid-area: 2/3; }
+
+  .actions {
+    position: absolute; bottom: 16px; right: 16px;
+    display: grid; grid-template-columns: repeat(2, 68px); grid-template-rows: 68px 68px;
+    gap: 8px; pointer-events: auto; opacity: 0.85;
+  }
+  .actions .btn { border-radius: 50%; font-size: 11px; }
+  .actions .special { grid-column: 1 / 3; border-radius: 14px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div class="touch" id="touch">
+  <div class="pad">
+    <button class="btn up" data-k="up">▲</button>
+    <button class="btn left" data-k="left">◀</button>
+    <button class="btn down" data-k="down">▼</button>
+    <button class="btn right" data-k="right">▶</button>
+  </div>
+  <div class="actions">
+    <button class="btn" data-k="punch">PUNCH</button>
+    <button class="btn" data-k="kick">KICK</button>
+    <button class="btn special" data-k="special">SPECIAL</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<script>
+(function(){
+'use strict';
+
+// ============ CONSTANTS ============
+const W = 960, H = 540, GROUND_Y = 470;
+const FLOOR_MIN = 60, FLOOR_MAX = W - 60;
+const ROUND_TIME = 60, ROUNDS_TO_WIN = 2;
+const SPR_W = 160, SPR_H = 220;
+
+// ============ CHARACTERS ============
+const MIYA = {
+  id:'miya', name:'MIYA BHAI', title:'The Righteous Fighter',
+  build:'muscular', hp:120, speed:260, jumpVel:-720, power:1.0,
+  colors:{ skin:0xd9a06a, hair:0x141414, beard:0x141414, shirt:0xf8f8f8, shirtTrim:0xdadada, pants:0x1e3a8a, shoes:0x2a2a2a, accent:0x60a5fa, headwearColor:0xffffff },
+  headwear:'cap', hasBeard:true, hasMoustache:true, hasCape:false, weapon:'none',
+  specialColor:0x7dd3fc, specialGlow:0x38bdf8
+};
+
+const VILLAINS = [
+  { id:'yazeed', name:'YAZEED PALEED', title:'The Tyrant King', build:'muscular', hp:100, speed:220, jumpVel:-650, power:0.95,
+    colors:{ skin:0xc98a5e, hair:0x0d0d0d, beard:0x0d0d0d, shirt:0x7f1d1d, shirtTrim:0xfbbf24, pants:0x450a0a, shoes:0x1a1a1a, accent:0xfbbf24, cape:0x2a0a0a, headwearColor:0x1a1a1a },
+    headwear:'turban', hasBeard:true, hasMoustache:true, hasCape:true, weapon:'sword',
+    specialColor:0xfbbf24, specialGlow:0xf59e0b },
+  { id:'firaun', name:'FIRAAUN NALLA', title:'The False God', build:'tall', hp:110, speed:240, jumpVel:-680, power:1.0,
+    colors:{ skin:0xb87a4e, hair:0x0d0d0d, beard:0x0d0d0d, shirt:0x1e40af, shirtTrim:0xfbbf24, pants:0xfbbf24, shoes:0x92400e, accent:0xfde68a, headwearColor:0x1e40af },
+    headwear:'pharaoh', hasBeard:false, hasMoustache:false, hasCape:false, weapon:'staff',
+    specialColor:0xfde68a, specialGlow:0xfacc15 },
+  { id:'namrood', name:'NAMROOD AMROOD', title:'The Tower Tyrant', build:'huge', hp:130, speed:190, jumpVel:-600, power:1.15,
+    colors:{ skin:0xc08858, hair:0x2a1810, beard:0x2a1810, shirt:0x78350f, shirtTrim:0xfbbf24, pants:0x450a0a, shoes:0x1a1a1a, accent:0xdc2626, cape:0x7f1d1d, headwearColor:0xfbbf24 },
+    headwear:'crown', hasBeard:true, hasMoustache:true, hasCape:true, weapon:'scepter',
+    specialColor:0xdc2626, specialGlow:0x991b1b },
+  { id:'qaroon', name:'QAROON BHUKKAD', title:'The Golden Hoarder', build:'fat', hp:120, speed:200, jumpVel:-560, power:1.05,
+    colors:{ skin:0xbf8a60, hair:0x1a1a1a, beard:0x1a1a1a, shirt:0xfbbf24, shirtTrim:0xfef3c7, pants:0xf59e0b, shoes:0x92400e, accent:0xfde68a, headwearColor:0xfde68a },
+    headwear:'turban', hasBeard:true, hasMoustache:true, hasCape:false, weapon:'rings',
+    specialColor:0xfde68a, specialGlow:0xfbbf24 },
+  { id:'abujahal', name:'ABU JAHAL PETLA', title:'The Arrogant Chief', build:'fat', hp:125, speed:210, jumpVel:-540, power:1.1,
+    colors:{ skin:0xc08858, hair:0x1a1a1a, beard:0x1a1a1a, shirt:0x991b1b, shirtTrim:0xfbbf24, pants:0x7f1d1d, shoes:0x1a1a1a, accent:0xfbbf24, headwearColor:0x7f1d1d },
+    headwear:'turban', hasBeard:true, hasMoustache:true, hasCape:false, weapon:'none',
+    specialColor:0xf97316, specialGlow:0xdc2626 },
+  { id:'iblees', name:'IBLEES PAAGAL', title:'The Cursed One — FINAL BOSS', build:'demon', hp:200, speed:260, jumpVel:-760, power:1.35,
+    colors:{ skin:0xb91c1c, hair:0x000000, beard:0x000000, shirt:0x0f0f1a, shirtTrim:0xdc2626, pants:0x000000, shoes:0x450a0a, accent:0xf97316, cape:0x1a0000, headwearColor:0x111111 },
+    headwear:'horns', hasBeard:true, hasMoustache:false, hasCape:true, weapon:'none', isBoss:true,
+    specialColor:0xf0abfc, specialGlow:0xa855f7 }
+];
+
+// ============ STAGES ============
+const STAGES = [
+  { name:"Yazeed's Palace",     backdrop:'palace',  skyTop:0x1a0505, skyBottom:0x4a0a0a, ground:0x2a0e0e, groundLine:0x6b1d1d, accent:0xfbbf24 },
+  { name:"Firaun's Nile Court", backdrop:'pyramid', skyTop:0xfbbf24, skyBottom:0xfde68a, ground:0xd4a24a, groundLine:0x8b5a1a, accent:0x1e40af },
+  { name:"Namrood's Tower",     backdrop:'tower',   skyTop:0x2a1a3a, skyBottom:0x7a3a4a, ground:0x3a2418, groundLine:0x6b3a1a, accent:0xdc2626 },
+  { name:"Qaroon's Vault",      backdrop:'vault',   skyTop:0x1a0e02, skyBottom:0x3a2205, ground:0x2a1a05, groundLine:0x8b6914, accent:0xfbbf24 },
+  { name:"Abu Jahal's Camp",    backdrop:'desert',  skyTop:0x0a1a2a, skyBottom:0x4a2a1a, ground:0xc49a5a, groundLine:0x7a5a2a, accent:0xf97316 },
+  { name:"Iblees's Inferno",    backdrop:'hell',    skyTop:0x1a0000, skyBottom:0x6b0a00, ground:0x1a0505, groundLine:0x991b1b, accent:0xf97316 }
+];
+
+// ============ SOUND ============
+let actx = null;
+function ac(){ if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); return actx; }
+function tone(type, f, fe, dur, gain, delay){
+  try{ const c=ac(); const t0=c.currentTime+(delay||0);
+    const o=c.createOscillator(), g=c.createGain();
+    o.type=type; o.frequency.setValueAtTime(f,t0);
+    if(fe!==undefined) o.frequency.exponentialRampToValueAtTime(Math.max(1,fe),t0+dur);
+    g.gain.setValueAtTime(gain||0.18,t0);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    o.connect(g).connect(c.destination); o.start(t0); o.stop(t0+dur+0.03);
+  }catch(e){}
+}
+function noise(dur, gain, filt){
+  try{ const c=ac(); const t0=c.currentTime;
+    const b=c.createBuffer(1, Math.max(1,Math.floor(c.sampleRate*dur)), c.sampleRate);
+    const d=b.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+    const s=c.createBufferSource(); s.buffer=b;
+    const f=c.createBiquadFilter(); f.type='lowpass'; f.frequency.value=filt||1200;
+    const g=c.createGain(); g.gain.setValueAtTime(gain||0.25,t0);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    s.connect(f).connect(g).connect(c.destination); s.start(t0); s.stop(t0+dur+0.03);
+  }catch(e){}
+}
+const SFX = {
+  punch(){ noise(0.09,0.32,1800); tone('triangle',220,80,0.08,0.22); },
+  kick(){ noise(0.14,0.4,1400); tone('sawtooth',160,60,0.14,0.28); },
+  hit(){ noise(0.11,0.35,2200); tone('square',400,120,0.1,0.15); },
+  jump(){ tone('square',320,780,0.14,0.14); },
+  land(){ noise(0.09,0.22,700); },
+  special(){ tone('sawtooth',140,700,0.35,0.22); tone('square',240,1200,0.4,0.12,0.05); noise(0.5,0.28,2600); },
+  projHit(){ noise(0.22,0.45,900); tone('sawtooth',200,55,0.25,0.3); },
+  ko(){ tone('sawtooth',300,60,0.9,0.3); noise(1.0,0.4,500); },
+  victory(){ [523,659,784,1046].forEach((f,i)=>tone('square',f,undefined,0.2,0.2,i*0.12)); },
+  defeat(){ [440,370,294,220].forEach((f,i)=>tone('triangle',f,undefined,0.28,0.22,i*0.16)); },
+  round(){ tone('sawtooth',180,90,0.35,0.28); tone('square',90,40,0.5,0.2,0.05); },
+  fight(){ tone('square',660,undefined,0.09,0.22); tone('square',990,undefined,0.12,0.22,0.11); },
+  select(){ tone('square',720,1080,0.06,0.14); },
+  deny(){ tone('square',220,110,0.14,0.2); }
+};
+
+// ============ SPRITE DRAWING ============
+const POSES = {
+  idle:{ head:[80,62], shoulder:[80,92], hip:[80,152], torsoW:34,
+    eB:[62,112], hB:[58,138], eF:[98,112], hF:[102,138], kB:[72,185], fB:[70,220], kF:[88,185], fF:[90,220] },
+  walk1:{ head:[80,62], shoulder:[80,92], hip:[80,152], torsoW:34,
+    eB:[60,118], hB:[56,140], eF:[100,106], hF:[106,128], kB:[66,182], fB:[54,218], kF:[94,184], fF:[102,220] },
+  walk2:{ head:[80,62], shoulder:[80,92], hip:[80,152], torsoW:34,
+    eB:[60,106], hB:[54,126], eF:[100,118], hF:[106,140], kB:[70,184], fB:[62,220], kF:[90,182], fF:[108,216] },
+  punch:{ head:[80,62], shoulder:[80,92], hip:[78,152], torsoW:34,
+    eB:[58,112], hB:[52,136], eF:[104,92], hF:[138,88], kB:[72,185], fB:[66,220], kF:[88,185], fF:[96,220] },
+  kick:{ head:[78,62], shoulder:[80,92], hip:[82,152], torsoW:34,
+    eB:[58,116], hB:[48,136], eF:[96,112], hF:[88,136], kB:[72,188], fB:[68,220], kF:[112,158], fF:[148,146] },
+  hit:{ head:[72,68], shoulder:[80,96], hip:[88,156], torsoW:34,
+    eB:[60,118], hB:[50,132], eF:[100,118], hF:[108,130], kB:[80,188], fB:[74,220], kF:[96,188], fF:[102,220] },
+  special:{ head:[80,62], shoulder:[80,92], hip:[80,152], torsoW:34,
+    eB:[72,106], hB:[112,96], eF:[88,106], hF:[122,100], kB:[72,185], fB:[66,220], kF:[88,185], fF:[94,220] }
+};
+
+function limb(g, color, w, a, b){
+  g.lineStyle(w, color, 1);
+  g.lineBetween(a[0],a[1],b[0],b[1]);
+  g.fillStyle(color,1);
+  g.fillCircle(a[0],a[1],w/2);
+  g.fillCircle(b[0],b[1],w/2);
+}
+function joint(g,color,w,p,a,b){ limb(g,color,w,p,a); limb(g,color,w,a,b); }
+function box(g,color,x,y,w,h){ g.fillStyle(color,1); g.fillRect(x,y,w,h); }
+
+function drawFighter(g, cfg, poseName){
+  const p = POSES[poseName] || POSES.idle;
+  const c = cfg.colors;
+  const w = cfg.build==='huge'||cfg.build==='demon'?14 : cfg.build==='fat'?13 : 11;
+  const legW = cfg.build==='huge'||cfg.build==='demon'?18 : cfg.build==='fat'?20 : 15;
+
+  // Cape (behind)
+  if(cfg.hasCape && c.cape){
+    g.fillStyle(c.cape, 0.95);
+    g.fillTriangle(p.shoulder[0]-22, p.shoulder[1]-4, p.shoulder[0]+22, p.shoulder[1]-4, p.shoulder[0], p.hip[1]+30);
+  }
+  // Back arm + back leg
+  joint(g, c.skin, w, p.shoulder, p.eB, p.hB);
+  joint(g, c.pants, legW, p.hip, p.kB, p.fB);
+  g.fillStyle(c.shoes,1); g.fillEllipse(p.fB[0]+4, p.fB[1]-3, 22, 10);
+
+  // Torso
+  const halfW = p.torsoW/2;
+  const topY = p.shoulder[1]-6;
+  const botY = p.hip[1]+8;
+  box(g, c.shirt, p.shoulder[0]-halfW, topY, p.torsoW, botY-topY);
+  box(g, c.shirtTrim, p.shoulder[0]-halfW, topY, p.torsoW, 4);
+  box(g, c.shirtTrim, p.shoulder[0]-halfW, botY-4, p.torsoW, 4);
+  g.fillStyle(0x000000, 0.12); g.fillRect(p.shoulder[0]-halfW, topY, 5, botY-topY);
+
+  // Front leg
+  joint(g, c.pants, legW, p.hip, p.kF, p.fF);
+  g.fillStyle(c.shoes,1); g.fillEllipse(p.fF[0]+4, p.fF[1]-3, 22, 10);
+
+  // Head
+  const hx=p.head[0], hy=p.head[1];
+  g.fillStyle(c.skin,1); g.fillCircle(hx,hy,17);
+  box(g, c.skin, hx-6, hy+12, 12, 12);
+  if(cfg.hasBeard){
+    g.fillStyle(c.beard,1); g.fillEllipse(hx, hy+14, 30, 22);
+    g.fillStyle(c.skin,1); g.fillEllipse(hx, hy+2, 32, 18);
+  }
+  if(cfg.hasMoustache){ g.fillStyle(c.hair,1); g.fillRect(hx-12, hy+4, 24, 5); }
+  g.fillStyle(0xffffff,1); g.fillCircle(hx-6, hy-2, 3); g.fillCircle(hx+6, hy-2, 3);
+  g.fillStyle(0x111111,1); g.fillCircle(hx-5, hy-2, 1.5); g.fillCircle(hx+7, hy-2, 1.5);
+  g.fillStyle(c.hair,1); g.fillEllipse(hx, hy-12, 34, 18);
+
+  // Headwear
+  const hw = cfg.headwear;
+  if(hw==='cap'){
+    g.fillStyle(c.headwearColor||0xffffff,1); g.fillEllipse(hx, hy-14, 36, 18);
+    g.fillRect(hx, hy-16, 30, 5);
+    g.fillStyle(0xdddddd,1); g.fillRect(hx-18, hy-10, 36, 3);
+  } else if(hw==='crown'){
+    g.fillStyle(c.headwearColor||0xfbbf24,1); g.fillRect(hx-18, hy-22, 36, 8);
+    g.fillTriangle(hx-18,hy-22, hx-12,hy-34, hx-6,hy-22);
+    g.fillTriangle(hx-4,hy-22, hx+2,hy-36, hx+8,hy-22);
+    g.fillTriangle(hx+10,hy-22, hx+16,hy-32, hx+22,hy-22);
+  } else if(hw==='turban'){
+    g.fillStyle(c.headwearColor||0x1a1a1a,1); g.fillEllipse(hx, hy-16, 42, 24);
+    g.fillStyle(c.accent,1); g.fillRect(hx-6, hy-28, 12, 6); g.fillCircle(hx, hy-26, 5);
+  } else if(hw==='pharaoh'){
+    g.fillStyle(c.headwearColor||0x1e40af,1); g.fillEllipse(hx, hy-18, 46, 24);
+    g.fillRect(hx-22, hy-20, 44, 18);
+    g.fillStyle(0xfbbf24,1);
+    for(let i=-20;i<=20;i+=8) g.fillRect(hx+i, hy-20, 3, 18);
+    g.fillRect(hx-2, hy-26, 6, 8); g.fillCircle(hx+2, hy-26, 3);
+  } else if(hw==='horns'){
+    g.fillStyle(0x1a0000,1);
+    g.fillTriangle(hx-20,hy-10, hx-30,hy-40, hx-8,hy-18);
+    g.fillTriangle(hx+20,hy-10, hx+30,hy-40, hx+8,hy-18);
+    g.fillStyle(c.accent,1); g.fillCircle(hx-6, hy-2, 3); g.fillCircle(hx+6, hy-2, 3);
+  }
+
+  // Front arm
+  joint(g, c.skin, w, p.shoulder, p.eF, p.hF);
+  g.fillCircle(p.hF[0], p.hF[1], w*0.75);
+
+  // Weapon
+  if(cfg.weapon==='sword'){
+    g.lineStyle(4, 0xcfd8dc, 1); g.lineBetween(p.hF[0], p.hF[1], p.hF[0]+32, p.hF[1]-26);
+    g.lineStyle(6, 0x6b4423, 1); g.lineBetween(p.hF[0]-4, p.hF[1]+2, p.hF[0], p.hF[1]);
+  } else if(cfg.weapon==='staff'){
+    g.lineStyle(4, 0x8b5a1a, 1); g.lineBetween(p.hF[0], p.hF[1]-20, p.hF[0], p.hF[1]+40);
+    g.fillStyle(c.accent,1); g.fillCircle(p.hF[0], p.hF[1]-22, 7);
+  } else if(cfg.weapon==='scepter'){
+    g.lineStyle(5, 0x78350f, 1); g.lineBetween(p.hF[0], p.hF[1]-20, p.hF[0]+6, p.hF[1]+30);
+    g.fillStyle(c.accent,1); g.fillCircle(p.hF[0], p.hF[1]-22, 9);
+  } else if(cfg.weapon==='rings'){
+    g.lineStyle(3, 0xfde68a, 1); g.strokeCircle(p.hF[0], p.hF[1], 8); g.strokeCircle(p.hF[0]+6, p.hF[1]+4, 6);
+  }
+}
+
+const SPRITE_KEYS = ['idle','walk1','walk2','punch','kick','hit','special'];
+function buildFighterTextures(scene, cfg){
+  for(const k of SPRITE_KEYS){
+    const key = 'f-'+cfg.id+'-'+k;
+    if(scene.textures.exists(key)) continue;
+    const g = scene.make.graphics({x:0,y:0});
+    drawFighter(g, cfg, k);
+    g.generateTexture(key, SPR_W, SPR_H);
+    g.destroy();
+  }
+}
+function tex(cfg, pose){ return 'f-'+cfg.id+'-'+pose; }
+
+// ============ TOUCH CONTROLS ============
+const TOUCH = { left:false, right:false, up:false, down:false, punch:false, kick:false, special:false };
+const touchEl = document.getElementById('touch');
+const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+if(isTouch) touchEl.classList.add('on');
+
+document.querySelectorAll('.btn').forEach(el=>{
+  const k = el.dataset.k;
+  const press = (v)=>{
+    TOUCH[k] = v;
+    el.classList.toggle('pressed', v);
+  };
+  el.addEventListener('touchstart', e=>{ e.preventDefault(); press(true); }, {passive:false});
+  el.addEventListener('touchend', e=>{ e.preventDefault(); press(false); }, {passive:false});
+  el.addEventListener('touchcancel', ()=> press(false));
+  el.addEventListener('mousedown', ()=> press(true));
+  el.addEventListener('mouseup', ()=> press(false));
+  el.addEventListener('mouseleave', ()=> press(false));
+});
+
+// ============ ATTACKS ============
+const ATTACKS = {
+  punch:{ startup:90, active:80, recovery:140, damage:7, reach:70, height:60 },
+  kick:{ startup:130, active:100, recovery:200, damage:11, reach:95, height:80 },
+  special:{ startup:200, active:160, recovery:300, damage:26, reach:170, height:100 }
+};
+
+// ============ FIGHTER CLASS ============
+class Fighter {
+  constructor(scene, cfg, x, facing, isPlayer){
+    this.cfg = cfg; this.isPlayer = isPlayer;
+    this.x = x; this.y = GROUND_Y; this.vx=0; this.vy=0;
+    this.facing = facing; this.hp = cfg.hp; this.maxHp = cfg.hp;
+    this.state = 'idle'; this.stateTime = 0; this.attackHasHit = false;
+    this.meter = 0; this.onGround = true; this.walkFrame = 0;
+    this.sprite = scene.add.sprite(x, GROUND_Y, tex(cfg, 'idle'));
+    this.sprite.setOrigin(0.5, 1);
+    this.sprite.setFlipX(facing === -1);
+  }
+  setPose(p){ this.sprite.setTexture(tex(this.cfg, p)); }
+  hurt(d){
+    if(this.state === 'ko') return;
+    this.hp = Math.max(0, this.hp - d);
+    this.state = 'hit'; this.stateTime = 0; this.setPose('hit');
+    if(this.hp <= 0){ this.state = 'ko'; this.stateTime = 0; }
+  }
+  reset(x, facing){
+    this.hp = this.maxHp; this.meter = 0; this.state='idle'; this.stateTime=0;
+    this.attackHasHit = false; this.x = x; this.y = GROUND_Y; this.vx=0; this.vy=0;
+    this.facing = facing; this.onGround = true;
+    this.sprite.setPosition(x, GROUND_Y); this.sprite.setAngle(0);
+    this.sprite.setFlipX(facing === -1); this.setPose('idle');
+  }
+  isAttacking(){ return this.state==='punch' || this.state==='kick' || this.state==='special'; }
+  currentAttack(){ return this.state==='punch'?ATTACKS.punch : this.state==='kick'?ATTACKS.kick : this.state==='special'?ATTACKS.special : null; }
+  isActive(){ const a = this.currentAttack(); if(!a) return false; return this.stateTime>=a.startup && this.stateTime<a.startup+a.active; }
+}
+
+// ============ HIT-STOP ============
+let hitStop = 0;
+
+// ============ PROJECTILES ============
+function makePulseTexture(scene, key, color, glow){
+  if(scene.textures.exists(key)) return;
+  const g = scene.make.graphics({x:0,y:0});
+  g.fillStyle(glow, 0.55); g.fillCircle(32,32,30);
+  g.fillStyle(color, 1); g.fillCircle(32,32,18);
+  g.fillStyle(0xffffff, 0.9); g.fillCircle(32,32,8);
+  g.generateTexture(key, 64, 64);
+  g.destroy();
+}
+function spawnProj(scene, x, y, facing, color, glow, owner, dmg, speed){
+  const core = scene.add.circle(0,0,16,color,1);
+  const gl = scene.add.circle(0,0,28,glow,0.5);
+  const sp = scene.add.circle(0,0,6,0xffffff,0.95);
+  const c = scene.add.container(x,y,[gl,core,sp]).setDepth(300);
+  const trail = scene.add.particles(0,0,'__WHITE',{
+    follow:c, speed:{min:20,max:80}, lifespan:240, scale:{start:0.9,end:0},
+    quantity:2, frequency:30, tint:[color,glow,0xffffff], blendMode:'ADD'
+  }).setDepth(299);
+  return { c, core, gl, vx: facing*speed, owner, dmg, life:1600, dead:false, trail };
+}
+function killProj(p){
+  if(p.dead) return;
+  p.dead = true;
+  p.trail.stop();
+  setTimeout(()=>p.trail.destroy(), 500);
+  p.c.scene.tweens.add({ targets:p.c, scale:1.8, alpha:0, duration:160, onComplete:()=>p.c.destroy() });
+}
+
+// ============ SELECT SCENE ============
+const PROGRESS_KEY = 'miya-bhai-progress';
+function loadProgress(){
+  const raw = localStorage.getItem(PROGRESS_KEY);
+  const n = raw ? Number(raw) : 0;
+  return Number.isFinite(n) ? Phaser.Math.Clamp(n,0,VILLAINS.length-1) : 0;
+}
+
+class SelectScene extends Phaser.Scene {
+  constructor(){ super('Select'); }
+  create(){
+    this.cameras.main.setBackgroundColor('#0a0a12');
+    this.selected = 0; this.cards = []; this.unlocked = loadProgress();
+    this.confirmLock = false;
+
+    const bg = this.add.graphics();
+    for(let i=0;i<30;i++){
+      const t=i/29;
+      const col = Phaser.Display.Color.Interpolate.ColorWithColor(
+        Phaser.Display.Color.ValueToColor(0x0a0a
